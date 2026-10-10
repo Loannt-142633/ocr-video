@@ -63,16 +63,14 @@ async function recognize(message, sender) {
     const context = canvas.getContext('2d', {willReadFrequently: true});
     context.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
     if (message.preprocess === 'white') {
-      // Typical white subtitles with dark outlines: isolate bright text, then invert.
+      // Optionally isolate neutral white text near dark outlines instead of every bright highlight.
       const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < pixels.data.length; i += 4) {
-        const value = Math.min(pixels.data[i], pixels.data[i+1], pixels.data[i+2]) > 175 ? 0 : 255;
-        pixels.data[i] = pixels.data[i+1] = pixels.data[i+2] = value;
-      }
+      OCRUtils.whiteSubtitlePixels(pixels.data, canvas.width, canvas.height, Math.max(2,Math.round(3*scale)), message.noiseFilter !== false);
       context.putImageData(pixels, 0, 0);
     }
     const engine = await getWorker(message.language);
-    const result = await engine.recognize(canvas);
+    const result = await engine.recognize(canvas, {}, {text:true,blocks:message.noiseFilter !== false});
+    if (message.noiseFilter !== false) return OCRUtils.filterSubtitle(result.data, message.language);
     return {text: OCRUtils.cleanText(result.data.text), confidence: result.data.confidence};
   } finally { busy = false; }
 }

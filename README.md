@@ -4,6 +4,8 @@ Bản 0.1.0 đọc **chữ đã ghép vào hình ảnh video**, không cần l�
 OCR và dữ liệu 4 ngôn ngữ đã nằm trong bộ code: **không cần npm, API key hay backend để đọc chữ**.
 Dịch AI là tùy chọn; cần chạy backend local và cấu hình một model phù hợp.
 
+**Lọc nhiễu phụ đề** mặc định bật: lọc dòng/từ độ tin cậy thấp, giữ vùng chữ chính; với chế độ chữ trắng còn ưu tiên chữ có viền tối để hạn chế nhận nhầm da/quần áo sáng thành chữ. Nếu thiếu chữ thật, tắt lọc hoặc dùng Ảnh gốc. Vẫn nên chọn vùng sát 1–3 dòng phụ đề, tránh cả cảnh phim/logo. Bộ lọc chỉ giảm nhiễu, không đảm bảo loại hết ký tự sai.
+
 ## Cài và dùng ngay trên Firefox máy tính
 
 1. Giải nén ZIP vào một thư mục cố định, ví dụ `D:\ComSubtitleOCR`.

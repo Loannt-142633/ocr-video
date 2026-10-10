@@ -58,6 +58,7 @@
         <div class="small">Kéo chọn vùng chữ. Bản này đọc chữ trong hình; chưa nghe âm thanh.</div>
         <label>Ngôn ngữ chữ <select id="language"><option value="chi_sim">Trung giản thể</option><option value="chi_tra">Trung phồn thể</option><option value="eng">English</option><option value="vie">Tiếng Việt</option></select></label>
         <label>Xử lý ảnh <select id="preprocess"><option value="white">Chữ trắng trên video</option><option value="original">Ảnh gốc (chữ màu / nền sáng)</option></select></label>
+        <label><input id="noise-filter" type="checkbox" checked> Lọc nhiễu phụ đề</label>
         <label>Khoảng quét <input id="interval" type="number" min="800" max="10000" step="100" value="1200"> ms</label>
         <label><input id="translate" type="checkbox"> Dịch AI qua backend local</label>
         <label>Ngôn ngữ đích <select id="target"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
@@ -78,13 +79,14 @@
     $('collapse').onclick = () => setCompact(true);
     $('expand').onclick = () => setCompact(false);
     $('pause').onclick = () => stop();
-    for (const name of ['language', 'preprocess', 'target', 'translate']) {
+    for (const name of ['language', 'preprocess', 'target', 'translate', 'noise-filter']) {
       $(name).onchange = () => { stop('Đã đổi cấu hình. Bấm Bắt đầu để tiếp tục.'); lastText = ''; $('translated').textContent = ''; save(); };
     }
     $('interval').onchange = save;
     browser.storage.local.get('settings').then(({settings}) => {
       if (!settings) return;
       for (const key of ['language', 'preprocess', 'target', 'interval']) if (settings[key] != null) $(key).value = settings[key];
+      if (typeof settings.noiseFilter === 'boolean') $('noise-filter').checked = settings.noiseFilter;
       // Translation always requires an explicit opt-in on each page.
     }).catch(() => {});
     let drag;
@@ -106,6 +108,7 @@
   function save() {
     const settings = {};
     for (const key of ['language', 'preprocess', 'target', 'interval']) settings[key] = $(key).value;
+    settings.noiseFilter = $('noise-filter').checked;
     browser.storage.local.set({settings}).catch(() => {});
   }
   function selectRegion() {
@@ -149,7 +152,7 @@
     try {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (token !== generation) return;
-      result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value});
+      result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value, noiseFilter: $('noise-filter').checked});
     } catch (error) { result = {error: error.message}; }
     finally { if (pendingCapture === requestId) { pendingCapture = null; host.style.visibility = 'visible'; } }
     if (token !== generation) return;

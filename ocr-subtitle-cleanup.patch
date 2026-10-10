@@ -1,0 +1,190 @@
+diff --git a/extension/content.js b/extension/content.js
+--- a/extension/content.js
++++ b/extension/content.js
+@@ -58,6 +58,7 @@
+         <div class="small">Kéo chọn vùng chữ. Bản này đọc chữ trong hình; chưa nghe âm thanh.</div>
+         <label>Ngôn ngữ chữ <select id="language"><option value="chi_sim">Trung giản thể</option><option value="chi_tra">Trung phồn thể</option><option value="eng">English</option><option value="vie">Tiếng Việt</option></select></label>
+         <label>Xử lý ảnh <select id="preprocess"><option value="white">Chữ trắng trên video</option><option value="original">Ảnh gốc (chữ màu / nền sáng)</option></select></label>
++        <label><input id="noise-filter" type="checkbox" checked> Lọc nhiễu phụ đề</label>
+         <label>Khoảng quét <input id="interval" type="number" min="800" max="10000" step="100" value="1200"> ms</label>
+         <label><input id="translate" type="checkbox"> Dịch AI qua backend local</label>
+         <label>Ngôn ngữ đích <select id="target"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
+@@ -78,13 +79,14 @@
+     $('collapse').onclick = () => setCompact(true);
+     $('expand').onclick = () => setCompact(false);
+     $('pause').onclick = () => stop();
+-    for (const name of ['language', 'preprocess', 'target', 'translate']) {
++    for (const name of ['language', 'preprocess', 'target', 'translate', 'noise-filter']) {
+       $(name).onchange = () => { stop('Đã đổi cấu hình. Bấm Bắt đầu để tiếp tục.'); lastText = ''; $('translated').textContent = ''; save(); };
+     }
+     $('interval').onchange = save;
+     browser.storage.local.get('settings').then(({settings}) => {
+       if (!settings) return;
+       for (const key of ['language', 'preprocess', 'target', 'interval']) if (settings[key] != null) $(key).value = settings[key];
++      if (typeof settings.noiseFilter === 'boolean') $('noise-filter').checked = settings.noiseFilter;
+       // Translation always requires an explicit opt-in on each page.
+     }).catch(() => {});
+     let drag;
+@@ -106,6 +108,7 @@
+   function save() {
+     const settings = {};
+     for (const key of ['language', 'preprocess', 'target', 'interval']) settings[key] = $(key).value;
++    settings.noiseFilter = $('noise-filter').checked;
+     browser.storage.local.set({settings}).catch(() => {});
+   }
+   function selectRegion() {
+@@ -149,7 +152,7 @@
+     try {
+       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+       if (token !== generation) return;
+-      result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value});
++      result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value, noiseFilter: $('noise-filter').checked});
+     } catch (error) { result = {error: error.message}; }
+     finally { if (pendingCapture === requestId) { pendingCapture = null; host.style.visibility = 'visible'; } }
+     if (token !== generation) return;
+diff --git a/extension/background.js b/extension/background.js
+--- a/extension/background.js
++++ b/extension/background.js
+@@ -63,16 +63,14 @@
+     const context = canvas.getContext('2d', {willReadFrequently: true});
+     context.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+     if (message.preprocess === 'white') {
+-      // Typical white subtitles with dark outlines: isolate bright text, then invert.
++      // Optionally isolate neutral white text near dark outlines instead of every bright highlight.
+       const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+-      for (let i = 0; i < pixels.data.length; i += 4) {
+-        const value = Math.min(pixels.data[i], pixels.data[i+1], pixels.data[i+2]) > 175 ? 0 : 255;
+-        pixels.data[i] = pixels.data[i+1] = pixels.data[i+2] = value;
+-      }
++      OCRUtils.whiteSubtitlePixels(pixels.data, canvas.width, canvas.height, Math.max(2,Math.round(3*scale)), message.noiseFilter !== false);
+       context.putImageData(pixels, 0, 0);
+     }
+     const engine = await getWorker(message.language);
+-    const result = await engine.recognize(canvas);
++    const result = await engine.recognize(canvas, {}, {text:true,blocks:message.noiseFilter !== false});
++    if (message.noiseFilter !== false) return OCRUtils.filterSubtitle(result.data, message.language);
+     return {text: OCRUtils.cleanText(result.data.text), confidence: result.data.confidence};
+   } finally { busy = false; }
+ }
+diff --git a/extension/ocr-utils.js b/extension/ocr-utils.js
+--- a/extension/ocr-utils.js
++++ b/extension/ocr-utils.js
+@@ -14,7 +14,62 @@
+     if (width < 5 || height < 5) throw new Error('Vùng chọn quá nhỏ.');
+     return {x, y, width, height};
+   }
+-  const api = {cleanText, cropRectangle};
++  function whiteSubtitlePixels(pixels, width, height, radius = 6, outlined = true) {
++    // An integral image finds dark outlines in O(1) per bright pixel.
++    // This suppresses bright skin/clothing instead of turning all highlights into text.
++    const stride = width + 1;
++    const dark = outlined ? new Uint32Array(stride * (height + 1)) : null;
++    if (dark) for (let y = 0; y < height; y++) {
++      let count = 0;
++      for (let x = 0; x < width; x++) {
++        const i = (y * width + x) * 4;
++        count += pixels[i] * .299 + pixels[i+1] * .587 + pixels[i+2] * .114 < 100 ? 1 : 0;
++        dark[(y+1)*stride+x+1] = dark[y*stride+x+1] + count;
++      }
++    }
++    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
++      const i = (y * width + x) * 4;
++      const low = Math.min(pixels[i], pixels[i+1], pixels[i+2]);
++      const high = Math.max(pixels[i], pixels[i+1], pixels[i+2]);
++      let ink = low > (outlined ? 185 : 175);
++      if (ink && dark) {
++        const x0=Math.max(0,x-radius), x1=Math.min(width,x+radius+1);
++        const y0=Math.max(0,y-radius), y1=Math.min(height,y+radius+1);
++        ink = high-low < 65 && dark[y1*stride+x1]-dark[y0*stride+x1]-dark[y1*stride+x0]+dark[y0*stride+x0] > 0;
++      }
++      pixels[i] = pixels[i+1] = pixels[i+2] = ink ? 0 : 255;
++    }
++    return pixels;
++  }
++
++  function filterSubtitle(data, language = 'eng') {
++    if (!Array.isArray(data.blocks)) return {text:cleanText(data.text), confidence:data.confidence};
++    const candidates = [];
++    for (const block of data.blocks) for (const paragraph of block.paragraphs || []) for (const line of paragraph.lines || []) {
++      if (line.confidence < 40) continue;
++      const meaningful = text => /[\p{L}\p{N}]/u.test(text);
++      const words = (line.words || []).filter(word => (word.confidence >= 35 && meaningful(word.text)) ||
++        (word.confidence >= 65 && /^[,.!?，。！？、:：;；…“”‘’"'—–-]+$/u.test(word.text)));
++      if (!words.some(w=>meaningful(w.text))) continue;
++      const count = words.reduce((sum,w)=>sum+Array.from(w.text).length,0);
++      const confidence = words.reduce((sum,w)=>sum+w.confidence*Array.from(w.text).length,0)/count;
++      if (confidence < 55 || (count <= 2 && confidence < 70)) continue;
++      const heights = words.map(w=>w.bbox.y1-w.bbox.y0).filter(h=>h>0).sort((a,b)=>a-b);
++      if (!heights.length) continue;
++      candidates.push({words, confidence, count, bbox:line.bbox, height:heights[Math.floor(heights.length/2)]});
++    }
++    if (!candidates.length) return {text:'',confidence:0};
++    // Keep the main subtitle band; small text elsewhere in a broad crop is usually background noise.
++    const anchor = candidates.reduce((a,b)=>a.count*a.confidence >= b.count*b.confidence ? a : b);
++    const selected = candidates.filter(line => line.height >= anchor.height*.55 && line.height <= anchor.height*1.8 &&
++      Math.abs((line.bbox.y0+line.bbox.y1-anchor.bbox.y0-anchor.bbox.y1)/2) <= anchor.height*3)
++      .sort((a,b)=>a.bbox.y0-b.bbox.y0);
++    const cjk = language.startsWith('chi_');
++    const text = selected.map(line => line.words.map(w=>cleanText(w.text)).join(cjk ? '' : ' ')).join('\n');
++    const count = selected.reduce((sum,l)=>sum+l.count,0);
++    return {text,confidence:selected.reduce((sum,l)=>sum+l.confidence*l.count,0)/count};
++  }
++  const api = {cleanText, cropRectangle, whiteSubtitlePixels, filterSubtitle};
+   if (typeof module !== 'undefined') module.exports = api;
+   else root.OCRUtils = api;
+ })(globalThis);
+diff --git a/tests/utils.test.cjs b/tests/utils.test.cjs
+--- a/tests/utils.test.cjs
++++ b/tests/utils.test.cjs
+@@ -1,6 +1,6 @@
+ const {test} = require('node:test');
+ const assert = require('node:assert/strict');
+-const {cropRectangle, cleanText} = require('../extension/ocr-utils.js');
++const {cropRectangle, cleanText, filterSubtitle, whiteSubtitlePixels} = require('../extension/ocr-utils.js');
+ test('screenshot crop accounts for device pixel ratio and browser zoom', () => {
+   assert.deepEqual(cropRectangle({x:100,y:300,width:400,height:60}, {width:1000,height:600}, {width:2000,height:1200}),
+     {x:200,y:600,width:800,height:120});
+@@ -16,3 +16,31 @@
+ test('OCR cleanup keeps subtitle line boundaries', () => {
+   assert.equal(cleanText(' Hello  \r\n\n world \n'), 'Hello\nworld');
+ });
++function line(text, confidence=90, y=100, height=20) {
++  return {text,confidence,bbox:{x0:10,x1:300,y0:y,y1:y+height},words:text.split(' ').map((text,i)=>({text,confidence,bbox:{x0:10+i*40,x1:40+i*40,y0:y,y1:y+height}}))};
++}
++const data = lines => ({blocks:[{paragraphs:[{lines}]}]});
++test('drops low-confidence background clutter and keeps both subtitle lines', () => {
++  const r=filterSubtitle(data([line('LJ',32,70),line("so you're dangling",90,100),line('marriage in front of me.',95,130),line('v',25,160),line('Fo) 4',20,190)]));
++  assert.equal(r.text,"so you're dangling\nmarriage in front of me.");
++});
++test('keeps genuine short replies, one letter, a number, and Chinese punctuation', () => {
++  for (const text of ['No!', 'I', '2']) assert.equal(filterSubtitle(data([line(text)])).text,text);
++  assert.equal(filterSubtitle(data([line('你 好 ！')]),'chi_sim').text,'你好！');
++});
++test('ignores smaller lettering and distant background text in a broad crop', () => {
++  assert.equal(filterSubtitle(data([line('channel',90,50,7),line('Main subtitle here.',90,100,24),line('unrelated',95,450,24)])).text,'Main subtitle here.');
++});
++test('empty and punctuation-only frames never produce subtitle text', () => {
++  assert.equal(filterSubtitle(data([])).text,'');
++  assert.equal(filterSubtitle(data([line('\\ | @',95)])).text,'');
++});
++test('outlined-white preprocessing suppresses bright backgrounds and keeps text near dark outlines', () => {
++  const pixels=new Uint8ClampedArray(7*4);
++  for(let i=0;i<7;i++)pixels.set([230,230,230,255],i*4);
++  pixels.set([0,0,0,255],3*4);
++  whiteSubtitlePixels(pixels,7,1,1,true);
++  assert.equal(pixels[0],255); // large bright background is not ink
++  assert.equal(pixels[2*4],0); // white text adjacent to dark stroke remains ink
++  assert.equal(pixels[3*4],255); // dark outline itself becomes background
++});
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -3,6 +3,8 @@
+ Bản 0.1.0 đọc **chữ đã ghép vào hình ảnh video**, không cần lấy file video hoặc audio.
+ OCR và dữ liệu 4 ngôn ngữ đã nằm trong bộ code: **không cần npm, API key hay backend để đọc chữ**.
+ Dịch AI là tùy chọn; cần chạy backend local và cấu hình một model phù hợp.
++
++**Lọc nhiễu phụ đề** mặc định bật: lọc dòng/từ độ tin cậy thấp, giữ vùng chữ chính; với chế độ chữ trắng còn ưu tiên chữ có viền tối để hạn chế nhận nhầm da/quần áo sáng thành chữ. Nếu thiếu chữ thật, tắt lọc hoặc dùng Ảnh gốc. Vẫn nên chọn vùng sát 1–3 dòng phụ đề, tránh cả cảnh phim/logo. Bộ lọc chỉ giảm nhiễu, không đảm bảo loại hết ký tự sai.
+ 
+ ## Cài và dùng ngay trên Firefox máy tính
+ 
