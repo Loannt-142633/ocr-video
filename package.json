@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/utils.test.cjs tests/content.test.cjs tests/background.test.cjs",
+    "test": "node --test tests/utils.test.cjs tests/content.test.cjs tests/background.test.cjs tests/video-frame.test.cjs",
     "lint": "web-ext lint --source-dir extension",
     "pack": "web-ext build --source-dir extension --overwrite-dest"
   },

@@ -77,13 +77,16 @@ export LLM_BASE_URL="http://127.0.0.1:11434/v1"
 
 - Đây là prototype đọc chữ; **chưa có nhận diện âm thanh**, chưa tự nhận diện ngôn ngữ OCR. Cơm chọn ngôn ngữ chữ gốc. Model dịch được yêu cầu tự nhận diện ngôn ngữ của văn bản OCR.
 - Chỉ quét **vùng nhìn thấy trên tab đang mở**. Chuyển tab thì dừng. Cuộn trang, thay đổi kích thước/zoom hoặc fullscreen thì cần chọn lại vùng.
-- Chụp screenshot của tab tránh việc đọc canvas từ nguồn video khác domain. Nội dung có bảo vệ vẫn có thể ra khung đen. Không đảm bảo hoạt động với mọi website/trình phát.
+- Ưu tiên crop trực tiếp từ `<video>` sẵn sàng khớp vùng OCR, có tính kích thước khung hình, vùng hiển thị, border/padding, `object-fit` và `object-position`. Chỉ ảnh crop được gửi tới background để xử lý ảnh/Tesseract. Popup không nằm trong ảnh này, nên có thể đè lên phụ đề gốc và kéo qua vùng OCR trong khi vẫn quét. Không sửa `src`/`crossOrigin` hay tải lại video đang phát.
+- Nếu video chưa sẵn sàng, không tìm được video phù hợp, canvas bị CORS/SecurityError hoặc nội dung có bảo vệ, dùng chụp tab. Không vượt CORS/DRM; ảnh vẫn có thể đen. Phần cuối giao diện đầy đủ cho biết đường lấy ảnh và lý do dự phòng. Không đảm bảo hoạt động với mọi website/trình phát.
+- Đọc video trực tiếp hiện chỉ hỗ trợ video trong trang chính và shadow DOM mở; **chưa đọc trực tiếp video trong iframe, kể cả iframe cùng origin**, hoặc shadow DOM đóng. Những trường hợp này dùng chụp tab. Layout xoay/3D, cú pháp object-position không hỗ trợ, nhiều video chồng nhau không xác định được video, hoặc vùng chọn bao gồm letterbox cũng dự phòng chụp tab. Đọc video chỉ lấy chữ đã ghép vào khung hình, không lấy phụ đề HTML/track hoặc logo phủ riêng trên trang.
+- Ảnh video được giới hạn cạnh tối đa 2.400 px, tối đa 4 triệu pixel và data URL PNG tối đa 8 triệu ký tự. Background xác thực tab/frame/sender, định dạng và kích thước PNG trước decode; vùng OCR sau xử lý cũng được giới hạn kích thước.
 - Fullscreen thật và Picture-in-Picture chưa hỗ trợ khung nổi. Dùng chế độ thường/theater.
 - OCR có thể nhầm tên riêng, chữ nhỏ, chữ màu, nền nhiều chi tiết, và đọc cả chữ khác trong vùng đã chọn. Chọn sát phụ đề, tăng kích thước video hoặc thử xử lý ảnh gốc.
 - Khoảng quét mặc định 1.200 ms là mục tiêu giữa các lần bắt đầu, không bảo đảm mỗi câu xử lý trong 1.200 ms. Chạy tuần tự để tránh xếp hàng ảnh cũ. Nếu OCR/dịch chậm, có thể bỏ lỡ câu ngắn; nên pause phim và dùng Đọc một lần khi cần.
 - Kết quả không có timestamp chính xác theo video, nên có thể trễ so với lời thoại. Chỉ bỏ qua dịch lại khi đã có bản dịch hợp lệ cho cùng câu và cùng ngôn ngữ đích. Nếu chưa dịch thành công (lỗi hoặc đã dừng/đổi cấu hình khi đang chờ), cùng câu vẫn được phép dịch lại. Nếu không có chữ rõ, kết quả cũ được xóa sau khoảng 3,5 giây khi quét.
 - Seek/pause chưa theo dõi trực tiếp trình phát. Chữ dịch cũ có thể còn một lúc sau khi tua; bấm Dừng/Bắt đầu để cập nhật.
-- Khung phụ đề luôn hiện khi chụp OCR; chỉ ẩn khi đang chọn vùng. Kéo khung thu gọn giữ nguyên phiên OCR/dịch và cấu hình, tạm bỏ qua lượt chụp mới trong lúc kéo. Thả ngoài vùng OCR thì tự tiếp tục ở lượt quét kế tiếp. Nếu thả trong vùng OCR, khung vẫn thu gọn và hiện “Kéo khung ra ngoài vùng OCR để tiếp tục”; chụp tạm ngưng đến khi kéo khung ra ngoài. Hủy kéo hoặc mất pointer capture cũng kết thúc trạng thái kéo. Không cần bấm Bắt đầu lại; nút Dừng/Đóng hoặc đổi cấu hình vẫn kết thúc phiên như trước.
+- Khung luôn hiện khi OCR; chỉ ẩn khi đang chọn vùng. Với ảnh video trực tiếp, kéo/thả và che vùng OCR không ngưng quét. Với chụp tab, tạm bỏ qua lượt chụp mới khi kéo; nếu khung che vùng OCR thì giữ thu gọn và báo “Trang này cần đặt khung ngoài vùng OCR”. Kéo ra ngoài rồi thả sẽ tự tiếp tục ở lượt quét kế tiếp. Hủy kéo hoặc mất pointer capture cũng kết thúc trạng thái kéo. Không cần bấm Bắt đầu lại; Dừng/Đóng hoặc đổi cấu hình vẫn kết thúc phiên như trước.
 - Giữ bản dịch cũ khi chờ dịch câu mới, trạng thái “Đang dịch…” chỉ nằm trong thông báo. Khi dừng hoặc đổi cấu hình, kết quả đang chờ bị bỏ qua; lượt quét mới chờ lượt OCR/dịch cũ kết thúc để tránh request chồng nhau.
 - Khi dịch lỗi hoặc trả bản dịch rỗng/sai định dạng, quét dừng và hiển thị lý do cùng hướng dẫn thử lại. Bấm **Đọc một lần** hoặc **Bắt đầu** để dịch lại; không tự gọi backend liên tục khi lỗi. Khi mở rộng khung gần đáy màn hình, khung được kéo lên để thấy thông báo.
 
@@ -110,7 +113,7 @@ npm run lint
 npm run pack
 ```
 
-Kiểm tra backend bằng `python tests/backend.test.py` (hoặc `.\.venv\Scripts\python.exe` trong repo). `npm test` kiểm tra xử lý OCR, khung luôn hiện khi chụp, giao vùng OCR, giữ bản dịch cũ, hủy kết quả sau dừng/đổi cấu hình, tuần tự request và thông báo lỗi backend. `node tests/browser-smoke.cjs` là kiểm tra Firefox với OCR thật và API extension/dịch được mô phỏng, cần Playwright cùng Firefox cài riêng. Các kiểm tra backend dùng provider giả, chưa chứng minh chất lượng hoặc tốc độ với Ollama thật.
+Kiểm tra backend bằng `python tests/backend.test.py` (hoặc `.\.venv\Scripts\python.exe` trong repo). `npm test` kiểm tra xử lý OCR, mapping video/crop/object-fit/object-position, giới hạn ảnh và sender, dự phòng CORS, giao vùng OCR, giữ bản dịch cũ, hủy kết quả sau dừng/đổi cấu hình, tuần tự request và thông báo lỗi backend. `node tests/browser-smoke.cjs` kiểm tra Firefox với video/canvas và OCR thật, API extension/dịch được mô phỏng; cần Playwright cùng Firefox và FFmpeg đi kèm cài riêng bằng `npx playwright install firefox`. Fixture video được tạo trong thư mục tạm rồi xóa. Các kiểm tra backend dùng provider giả, chưa chứng minh chất lượng hoặc tốc độ với Ollama thật.
 
 `npm run pack` tạo ZIP **chưa ký** để gửi Mozilla. Không bao gồm backend. OCR dùng Tesseract.js 6.0.1, dữ liệu chi_sim/chi_tra/eng/vie đã đóng gói. Xem `licenses/` và `THIRD_PARTY.md`.
 
@@ -118,4 +121,6 @@ Tài liệu chính thức:
 - https://extensionworkshop.com/documentation/develop/temporary-installation-in-firefox/
 - https://extensionworkshop.com/documentation/publish/self-distribution/
 - https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/captureVisibleTab
+- https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/object-fit
+- https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/object-position
 - https://github.com/naptha/tesseract.js

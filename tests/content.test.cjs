@@ -12,7 +12,7 @@ const deferred = () => {
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 // Minimal DOM boundary: run the actual content script and its event handlers.
-function fixture(sendMessage, {manualTimers = false} = {}) {
+function fixture(sendMessage, {manualTimers = false, capture = () => ({frame: null, reason: 'Tab fallback'})} = {}) {
   const timers = [];
   const elements = new Map();
   function element(id = '') {
@@ -37,6 +37,7 @@ function fixture(sendMessage, {manualTimers = false} = {}) {
   const created = [];
   let listener;
   const context = {
+    VideoFrameCapture: {capture},
     document: {hidden: false, documentElement: {appendChild() {}}, addEventListener() {}, removeEventListener() {},
       createElement() { const el = element(); created.push(el); return el; }},
     window: {addEventListener() {}}, innerWidth: 1200, innerHeight: 800, Date,
@@ -418,5 +419,66 @@ for (const action of ['pause', 'compact-close', 'target']) {
     assert.equal(f.get('scan-notice').hidden, true);
     assert.notEqual(f.get('translated').textContent, 'STALE');
     if (action === 'compact-close') assert.equal(f.host.style.display, 'none');
+  });
+}
+
+test('direct video crop permits overlap and continues OCR/translation while dragging', async () => {
+  let captures = 0;
+  const frame = {dataURL: 'data:image/png;base64,fixture', width: 200, height: 80};
+  const f = fixture(async m => {
+    if (m.type === 'OCR') { assert.equal(m.frame, frame); return {text: `Line ${++captures}`, confidence: 95}; }
+    return {translation: `Video ${captures}`};
+  }, {manualTimers: true, capture: () => ({frame, reason: ''})});
+  f.host.getBoundingClientRect = inside;
+  f.get('translate').checked = true;
+  const loop = f.get('start').onclick();
+  await tick();
+  f.get('panel').onpointerdown(dragPoint);
+  await f.nextScan();
+  assert.equal(captures, 2);
+  assert.equal(f.get('translated').textContent, 'Video 2');
+  assert.equal(f.get('scan-notice').hidden, true);
+  assert.equal(f.get('panel').classList.contains('compact'), true);
+  f.get('panel').onpointerup(dragPoint);
+  await f.nextScan();
+  assert.equal(captures, 3);
+  f.get('pause').onclick(); await f.nextScan(); await loop;
+});
+
+test('canvas fallback captures tab outside OCR and only pauses when panel overlaps', async () => {
+  let captures = 0;
+  const f = fixture(async m => { captures++; assert.equal(m.frame, null); return {text: 'Hello', confidence: 95}; },
+    {manualTimers: true, capture: () => ({frame: null, reason: 'Canvas bị CORS chặn; dùng chụp tab.'})});
+  const loop = f.get('start').onclick();
+  await tick();
+  assert.equal(captures, 1);
+  assert.match(f.get('footer').textContent, /CORS/);
+  f.host.getBoundingClientRect = inside;
+  await f.nextScan();
+  assert.equal(captures, 1);
+  assert.equal(f.get('scan-notice').hidden, false);
+  assert.equal(f.get('panel').classList.contains('compact'), true);
+  f.host.getBoundingClientRect = outside;
+  await f.nextScan();
+  assert.equal(captures, 2);
+  f.get('pause').onclick(); await f.nextScan(); await loop;
+});
+
+for (const action of ['pause', 'target']) {
+  test(`direct video ${action} discards stale translation and permits a new scan`, async () => {
+    const pending = deferred();
+    let translations = 0;
+    const f = fixture(async m => m.type === 'OCR' ? {text: 'Video line', confidence: 95} :
+      (++translations === 1 ? pending.promise : {translation: 'Fresh video translation'}),
+    {capture: () => ({frame: {dataURL: 'fixture', width: 100, height: 50}, reason: ''})});
+    f.get('translate').checked = true;f.host.getBoundingClientRect = inside;
+    const scan = f.get('once').onclick();await tick();
+    if (action === 'target') {f.get('target').value = 'en';f.get('target').onchange();}
+    else f.get('pause').onclick();
+    pending.resolve({translation: 'STALE VIDEO'});await scan;
+    assert.notEqual(f.get('translated').textContent, 'STALE VIDEO');
+    await f.get('once').onclick();
+    assert.equal(f.get('translated').textContent, 'Fresh video translation');
+    assert.equal(translations, 2);
   });
 }

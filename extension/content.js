@@ -5,17 +5,18 @@
   let lastOCRText = '', lastTranslation = null, requestCounter = 0, scanInFlight = null;
   let regionViewport = null, lastNonempty = 0;
   let drag = null;
+  let captureMode = 'tab';
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const $ = id => ui.getElementById(id);
   const status = text => { if (ui) $('status').textContent = text; };
 
   function scanPaused() {
     const box = host.getBoundingClientRect();
-    const overlaps = region && box.left < region.x + region.width && box.right > region.x &&
+    const overlaps = captureMode === 'tab' && region && box.left < region.x + region.width && box.right > region.x &&
       box.top < region.y + region.height && box.bottom > region.y;
     // Keep this separate from status: an in-flight translation may still complete.
     $('scan-notice').hidden = !!drag || !overlaps;
-    return !!drag || !!overlaps;
+    return (captureMode === 'tab' && !!drag) || !!overlaps;
   }
 
   function setCompact(compact) {
@@ -84,7 +85,7 @@
         <button id="collapse" style="margin-top:8px" title="Chỉ hiện nội dung phụ đề">Thu gọn</button>
         </div>
         <div id="status" role="status">Chọn vùng phụ đề để bắt đầu.</div>
-        <div id="scan-notice" role="status" hidden>Kéo khung ra ngoài vùng OCR để tiếp tục</div>
+        <div id="scan-notice" role="status" hidden>Trang này cần đặt khung ngoài vùng OCR</div>
         <div id="original" class="text">Chữ OCR sẽ hiện ở đây.</div>
         <div id="translated" class="text" hidden></div>
         <div id="footer" class="small" style="margin-top:8px">Chỉ quét tab đang xem. Esc hủy chọn vùng.</div>
@@ -178,13 +179,16 @@
     if (!region) { status('Cơm chọn vùng phụ đề trước nhé.'); return; }
     if (document.hidden) { stop('Đã dừng vì tab không còn hiển thị.'); return; }
     if (innerWidth !== regionViewport.width || innerHeight !== regionViewport.height) { region = null; stop('Kích thước trang thay đổi. Hãy chọn lại vùng.'); return; }
+    const captured = VideoFrameCapture.capture(region);
+    captureMode = captured.frame ? 'video' : 'tab';
+    $('footer').textContent = captured.frame ? 'OCR từ ảnh video trực tiếp; khung có thể che phụ đề gốc.' : captured.reason;
     if (scanPaused()) return;
     const requestId = ++requestCounter;
     status('Đang đọc chữ… Lần đầu cần nạp mô hình OCR.');
     let result;
     try {
       if (token !== generation) return;
-      result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value, noiseFilter: $('noise-filter').checked});
+      result = await browser.runtime.sendMessage({type: 'OCR', requestId, frame: captured.frame, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value, noiseFilter: $('noise-filter').checked});
     } catch (error) { result = {error: error.message}; }
     if (token !== generation) return;
     if (!result || result.error) { stop(result?.error || 'Không kết nối được extension. Hãy tải lại trang.'); return; }
