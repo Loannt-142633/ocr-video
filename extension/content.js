@@ -2,7 +2,7 @@
   if (globalThis.__comSubtitleOCR) return;
   globalThis.__comSubtitleOCR = true;
   let host, ui, region = null, running = false, generation = 0, selecting = false;
-  let lastText = '', requestCounter = 0, pendingCapture = null;
+  let lastText = '', requestCounter = 0, scanInFlight = null;
   let regionViewport = null, lastNonempty = 0;
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const $ = id => ui.getElementById(id);
@@ -141,20 +141,30 @@
     };
   }
   async function scan(token) {
+    // Keep old requests serialized even across stop/restart or repeated one-shot clicks.
+    while (scanInFlight) await scanInFlight;
+    if (token !== generation || selecting) return;
+    const task = scanRegion(token);
+    scanInFlight = task;
+    try { await task; } finally { if (scanInFlight === task) scanInFlight = null; }
+  }
+  async function scanRegion(token) {
     if (!region) { status('Cơm chọn vùng phụ đề trước nhé.'); return; }
     if (document.hidden) { stop('Đã dừng vì tab không còn hiển thị.'); return; }
     if (innerWidth !== regionViewport.width || innerHeight !== regionViewport.height) { region = null; stop('Kích thước trang thay đổi. Hãy chọn lại vùng.'); return; }
+    const box = host.getBoundingClientRect();
+    if (box.left < region.x + region.width && box.right > region.x &&
+        box.top < region.y + region.height && box.bottom > region.y) {
+      stop('Khung phụ đề đang che vùng OCR. Hãy kéo khung ra ngoài vùng đã chọn rồi bắt đầu lại.');
+      return;
+    }
     const requestId = ++requestCounter;
-    pendingCapture = requestId;
     status('Đang đọc chữ… Lần đầu cần nạp mô hình OCR.');
-    host.style.visibility = 'hidden';
     let result;
     try {
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (token !== generation) return;
       result = await browser.runtime.sendMessage({type: 'OCR', requestId, region, viewport: regionViewport, language: $('language').value, preprocess: $('preprocess').value, noiseFilter: $('noise-filter').checked});
     } catch (error) { result = {error: error.message}; }
-    finally { if (pendingCapture === requestId) { pendingCapture = null; host.style.visibility = 'visible'; } }
     if (token !== generation) return;
     if (!result || result.error) { stop(result?.error || 'Không kết nối được extension. Hãy tải lại trang.'); return; }
     if (result.busy) { status('OCR đang xử lý. Chờ lần quét tiếp theo.'); return; }
@@ -168,7 +178,7 @@
     status(`Đã đọc · độ tin cậy OCR ${Math.round(result.confidence)}% (ước lượng).`);
     if (text === lastText) return;
     lastText = text; $('original').textContent = text; $('translated').hidden = !$('translate').checked;
-    $('translated').textContent = $('translate').checked ? 'Đang dịch…' : '';
+    if (!$('translate').checked) $('translated').textContent = '';
     if ($('translate').checked) {
       status('Đang dịch…');
       const translated = await browser.runtime.sendMessage({type: 'TRANSLATE', text, target: $('target').value}).catch(error => ({error: error.message}));
@@ -196,9 +206,6 @@
   browser.runtime.onMessage.addListener(message => {
     if (message.type === 'OPEN') { mount(); return Promise.resolve({ok: true}); }
     if (message.type === 'STOP') { stop('Đã dừng vì Cơm mở OCR ở tab khác.'); return Promise.resolve({ok: true}); }
-    if (message.type === 'CAPTURE_DONE' && message.requestId === pendingCapture) {
-      pendingCapture = null; host.style.visibility = 'visible'; return Promise.resolve({ok: true});
-    }
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden && running) stop('Đã dừng khi đổi tab.'); });
   window.addEventListener('scroll', () => { if (region) { region = null; stop('Trang đã cuộn. Hãy chọn lại vùng phụ đề.'); } }, {passive: true});

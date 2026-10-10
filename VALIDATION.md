@@ -1,12 +1,12 @@
 # Validation — 0.1.0
 
 - JavaScript syntax checks: passed.
-- Region conversion / screenshot scaling / boundary clipping / text cleanup: 4 tests passed.
+- JavaScript unit checks: 16 tests passed, covering crop/scaling, subtitle cleanup/noise filtering, visible panel during capture, overlap blocking, keeping the previous translation, generation cancellation after stop/configuration changes, serialized requests, and backend error details/fallbacks.
 - Firefox browser runtime: actual Tesseract WASM OCR recognized `Hello Com, subtitle OCR works!`; confidence about 95% on a synthetic English fixture. chi_sim, chi_tra, and vie models also initialized from local packaged files.
-- Firefox UI integration: drag-selection → screenshot of synthetic subtitle page → preprocessing → actual local OCR → floating result panel: passed. Browser extension APIs were mocked in this browser-level test. It does not prove the add-on is installed or has capture permissions in a normal Firefox profile.
+- Firefox UI integration: drag-selection → screenshot of synthetic subtitle page → preprocessing → actual local OCR → floating result panel: passed. The panel remained visible during screenshots; overlap blocked capture and showed the move instruction. Compact/expanded display and translation error display also passed. Browser extension APIs and translation were mocked in this browser-level test. It does not prove the add-on is installed or has capture permissions in a normal Firefox profile.
 - Firefox extension validator (`web-ext lint`): zero errors; three eval warnings originate in upstream bundled Tesseract/worker JavaScript. No unsafe-eval permission was enabled. WASM/browser OCR works under the same script/worker CSP in the browser test.
-- Optional backend: invalid input, missing model configuration, and chat-completions provider contract passed (3 tests, fake provider).
-- A real LLM API was not called. Translation quality, credentials, cost, and provider compatibility need to be checked with the chosen provider/model.
+- Optional backend: 6 tests passed on Python 3.12.10 with a fake provider: validation, missing model, temperature/provider contract, successful retry for Vietnamese/English, failed retry for Chinese/Japanese/Korean characters, and cancellation during retry under a shared deadline. The timeout test shortens the 40-second deadline to avoid a slow test.
+- A real LLM API or Ollama model was not called. Translation quality, Vietnamese diacritics, real-model retry behavior, speed, and provider compatibility remain unverified. The character check cannot detect every wrong-language response.
 - Actual video sites, DRM, fullscreen, Firefox toolbar click/activeTab capture permission, and Mozilla signing have not been verified here. Automated access to Firefox's internal add-on loading page was blocked by the test browser, so normal Firefox installation must be tested by the user.
 
 Re-run core checks:

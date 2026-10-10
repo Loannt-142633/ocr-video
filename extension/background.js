@@ -50,9 +50,8 @@ async function recognize(message, sender) {
   if (busy) return {busy: true};
   busy = true;
   try {
-    // Capture before waiting for model initialization. The content panel stays hidden only briefly.
+    // The panel stays visible; content.js rejects regions overlapping it.
     const screenshot = await browser.tabs.captureVisibleTab(tab.windowId, {format: 'png'});
-    await browser.tabs.sendMessage(tab.id, {type: 'CAPTURE_DONE', requestId: message.requestId}).catch(() => {});
     const [stillVisible] = await browser.tabs.query({active: true, windowId: tab.windowId});
     if (!stillVisible || stillVisible.id !== tab.id) throw new Error('Tab đã thay đổi trong lúc chụp. Đã bỏ ảnh này.');
     const img = new Image(); img.src = screenshot; await img.decode();
@@ -87,7 +86,11 @@ async function translate(text, target) {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({text, target}), signal: controller.signal
     });
-    if (!response.ok) throw new Error(`Backend dịch trả lỗi ${response.status}. Kiểm tra terminal backend.`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      const detail = typeof error?.detail === 'string' ? error.detail.trim() : '';
+      throw new Error(detail || `Backend dịch trả lỗi ${response.status}. Kiểm tra terminal backend.`);
+    }
     const data = await response.json();
     if (typeof data.translation !== 'string') throw new Error('Backend trả kết quả sai định dạng.');
     if (translationCache.size >= 200) translationCache.delete(translationCache.keys().next().value);

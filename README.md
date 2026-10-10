@@ -59,7 +59,9 @@ Ollama và model phải được cài riêng; extension không cài chúng. Nế
 
 Mở `http://127.0.0.1:8787/health` để kiểm tra server. `model_configured: true` chỉ xác nhận có tên model, không đảm bảo model/provider gọi được.
 Trên khung extension, bật **Dịch AI qua backend local**, chọn ngôn ngữ đích, rồi Bắt đầu.
-Nếu lỗi 503: chưa đặt model. Lỗi 502: kiểm tra URL, model, key. Lỗi 504: model quá chậm.
+Nếu lỗi 503: chưa đặt model. Lỗi 502: kiểm tra URL, model, key hoặc nội dung bản dịch theo thông báo cụ thể trên extension. Lỗi 504: model quá chậm.
+
+Backend đặt `temperature=0` và yêu cầu dịch toàn bộ nội dung sang ngôn ngữ đích, kể cả nguồn trộn nhiều ngôn ngữ; chỉ trả bản dịch, không kèm câu gốc hay giải thích. Đích tiếng Việt được yêu cầu có dấu và dịch cả tiếng Anh/Trung. Với đích Việt/Anh, nếu kết quả còn ký tự Trung/Nhật/Hàn, backend thử lại tối đa một lần với chỉ dẫn rõ hơn; nếu vẫn còn thì trả lỗi. Tổng thời gian hai lần gọi model giới hạn 40 giây. Kiểm tra ký tự chỉ phát hiện một số lỗi, không phát hiện được mọi trường hợp sai ngôn ngữ (ví dụ tiếng Anh còn sót trong bản dịch tiếng Việt).
 
 ### Linux/macOS
 
@@ -81,7 +83,8 @@ export LLM_BASE_URL="http://127.0.0.1:11434/v1"
 - Khoảng quét mặc định 1.200 ms là mục tiêu giữa các lần bắt đầu, không bảo đảm mỗi câu xử lý trong 1.200 ms. Chạy tuần tự để tránh xếp hàng ảnh cũ. Nếu OCR/dịch chậm, có thể bỏ lỡ câu ngắn; nên pause phim và dùng Đọc một lần khi cần.
 - Kết quả không có timestamp chính xác theo video, nên có thể trễ so với lời thoại. Chữ giống hệt liên tiếp không dịch lại. Nếu không có chữ rõ, kết quả cũ được xóa sau khoảng 3,5 giây khi quét.
 - Seek/pause chưa theo dõi trực tiếp trình phát. Chữ dịch cũ có thể còn một lúc sau khi tua; bấm Dừng/Bắt đầu để cập nhật.
-- Panel ẩn ngắn lúc chụp, rồi hiện ngay khi chụp xong. Vị trí khung không che chữ gốc sẽ dễ xem hơn.
+- Khung phụ đề luôn hiện khi chụp OCR; chỉ ẩn khi đang chọn vùng. Nếu khung giao với vùng OCR, quét dừng và thông báo kéo khung ra ngoài vùng đã chọn, tránh OCR đọc lại chính bản dịch. Kéo khung rồi bấm Bắt đầu lại.
+- Giữ bản dịch cũ khi chờ dịch câu mới, trạng thái “Đang dịch…” chỉ nằm trong thông báo. Khi dừng hoặc đổi cấu hình, kết quả đang chờ bị bỏ qua; lượt quét mới chờ lượt OCR/dịch cũ kết thúc để tránh request chồng nhau.
 
 ## Quyền và dữ liệu
 
@@ -105,6 +108,8 @@ npm test
 npm run lint
 npm run pack
 ```
+
+Kiểm tra backend bằng `python tests/backend.test.py` (hoặc `.\.venv\Scripts\python.exe` trong repo). `npm test` kiểm tra xử lý OCR, khung luôn hiện khi chụp, giao vùng OCR, giữ bản dịch cũ, hủy kết quả sau dừng/đổi cấu hình, tuần tự request và thông báo lỗi backend. `node tests/browser-smoke.cjs` là kiểm tra Firefox với OCR thật và API extension/dịch được mô phỏng, cần Playwright cùng Firefox cài riêng. Các kiểm tra backend dùng provider giả, chưa chứng minh chất lượng hoặc tốc độ với Ollama thật.
 
 `npm run pack` tạo ZIP **chưa ký** để gửi Mozilla. Không bao gồm backend. OCR dùng Tesseract.js 6.0.1, dữ liệu chi_sim/chi_tra/eng/vie đã đóng gói. Xem `licenses/` và `THIRD_PARTY.md`.
 

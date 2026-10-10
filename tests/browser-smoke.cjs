@@ -1,5 +1,6 @@
 const {firefox}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+const assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../extension');
 (async()=>{
  const server=http.createServer((req,res)=>{const filename=req.url==='/demo.html'?path.resolve(root,'../demo.html'):path.join(root,decodeURIComponent(req.url.split('?')[0]));try{const bytes=fs.readFileSync(filename);res.setHeader('Content-Type',filename.endsWith('.js')?'application/javascript':filename.endsWith('.wasm')?'application/wasm':filename.endsWith('.html')?'text/html':'application/octet-stream');if(req.url!=='/demo.html')res.setHeader('Content-Security-Policy',"script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'");res.end(bytes)}catch{res.writeHead(404).end()}});
@@ -13,18 +14,20 @@ const root=path.resolve(__dirname,'../extension');
  console.log(await page.evaluate(async(data)=>{activeTabId=11;window.fixture='data:image/png;base64,'+data;return await recognize({region:{x:0,y:0,width:900,height:120},viewport:{width:900,height:120},language:'eng',preprocess:'original',requestId:1},{tab:{id:11,windowId:1}})},data));
  console.log(await page.evaluate(async()=>{const result=[];for(const lang of ['chi_sim','chi_tra','vie']){await getWorker(lang);result.push(lang+' loaded')}return result}));
 
- const movie=await browser.newPage({viewport:{width:1200,height:800}});
+ // Leave room beside the 1000px demo screen for the expanded 340px panel.
+ const movie=await browser.newPage({viewport:{width:1800,height:800}});
  await movie.addInitScript(()=>{
   const orig=Element.prototype.attachShadow;Element.prototype.attachShadow=function(o){return orig.call(this,{...o,mode:'open'})};
   window.messageListener=null;
   window.browser={storage:{local:{get:async()=>({}),set:async()=>{}}},runtime:{onMessage:{addListener:f=>window.messageListener=f},sendMessage:m=>window.ocrBridge(m)}};
  });
- let failTranslation = false;
+ let failTranslation = false, captures = 0;
  await movie.exposeFunction('ocrBridge',async(message)=>{
   if(message.type==='TRANSLATE') return failTranslation ? {error:'Test: backend translation unavailable.'} : {translation:'Chào Cơm, OCR phụ đề hoạt động!'};
   if(message.type!=='OCR')throw Error('Unexpected message in browser test');
+  captures++;
+  assert.equal(await movie.locator('#panel').isVisible(),true, 'Panel remains visible at capture');
   const screenshot=(await movie.screenshot()).toString('base64');
-  await movie.evaluate(id=>window.messageListener({type:'CAPTURE_DONE',requestId:id}),message.requestId);
   return await page.evaluate(async({message,screenshot})=>{window.fixture='data:image/png;base64,'+screenshot;activeTabId=11;return await recognize(message,{tab:{id:11,windowId:1}})},{message,screenshot});
  });
  await movie.goto(base+'demo.html');
@@ -43,7 +46,6 @@ const root=path.resolve(__dirname,'../extension');
  await movie.waitForFunction(()=>[...document.querySelectorAll('div')].some(el=>{
   const s=el.shadowRoot;return s?.getElementById('panel')?.classList.contains('compact') && s.getElementById('translated')?.textContent==='Chào Cơm, OCR phụ đề hoạt động!';
  }));
- const assert=require('node:assert/strict');
  assert.equal(await movie.locator('#settings').isVisible(),false);
  assert.equal(await movie.locator('#original').isVisible(),false);
  assert.equal(await movie.locator('#status').isVisible(),false);
@@ -65,6 +67,15 @@ const root=path.resolve(__dirname,'../extension');
  assert.equal(await movie.locator('#settings').isVisible(),true);
  await movie.locator('#start').click();
  console.log('Compact translation display / expand preserves settings and scan / translation error reopens panel: passed (translation mocked).');
+ const previousCaptures = captures;
+ await movie.evaluate(async bounds=>{
+  const host=[...document.querySelectorAll('div')].find(el=>el.shadowRoot);
+  host.style.left=`${bounds.x}px`;host.style.top=`${bounds.y}px`;host.style.right='auto';
+  await host.shadowRoot.getElementById('once').onclick();
+ },bounds);
+ assert.equal(captures,previousCaptures,'Overlapping panel must block capture');
+ assert.match(await movie.locator('#status').textContent(),/kéo khung ra ngoài/);
+ console.log('Panel overlapping OCR region blocks screenshot and displays move instruction: passed.');
  }finally{await browser.close();server.close()}
 
 })().catch(e=>{console.error(e);process.exit(1)});
