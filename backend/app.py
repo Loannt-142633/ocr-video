@@ -4,9 +4,17 @@ from typing import Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Cơm Subtitle Translation", docs_url="/docs")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^moz-extension://[0-9a-fA-F-]{36}$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 class TranslationRequest(BaseModel):
