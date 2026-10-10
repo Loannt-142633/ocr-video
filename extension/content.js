@@ -8,13 +8,25 @@
   const $ = id => ui.getElementById(id);
   const status = text => { if (ui) $('status').textContent = text; };
 
+  function setCompact(compact) {
+    if (!ui) return;
+    $('panel').classList.toggle('compact', compact);
+    $('panel').dataset.translation = String($('translate').checked);
+    $('panel').tabIndex = compact ? 0 : -1;
+    $('collapse').textContent = compact ? 'Mở cài đặt' : 'Thu gọn';
+    if (compact && $('translate').checked) {
+      $('translated').hidden = false;
+      if (!$('translated').textContent) $('translated').textContent = 'Đang chờ bản dịch…';
+    }
+  }
+
   function stop(note = 'Đã dừng.') {
     running = false; generation++;
     if (host) host.style.visibility = 'visible';
-    if (ui) { $('start').textContent = 'Bắt đầu'; status(note); }
+    if (ui) { setCompact(false); $('start').textContent = 'Bắt đầu'; status(note); }
   }
   function mount() {
-    if (host) { host.style.display = ''; return; }
+    if (host) { host.style.display = ''; setCompact(false); return; }
     host = document.createElement('div');
     host.style.cssText = 'position:fixed;top:16px;right:16px;width:340px;max-width:calc(100vw - 24px);z-index:2147483647;';
     document.documentElement.appendChild(host);
@@ -30,9 +42,19 @@
         #status{font-size:12px;color:#bdd0df;margin:10px 0;min-height:18px}
         .text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto;padding:9px;background:#0e1625;border-radius:7px;user-select:text}
         #translated{color:#b3f3de;margin-top:8px} .small{font-size:12px;color:#aabacd} input[type=number]{width:72px;padding:5px;background:#293850;color:#fff;border:1px solid #53637c;border-radius:5px}
+        .compact-tools{display:none}
+        .panel.compact{position:relative;padding:8px;cursor:move;touch-action:none}
+        .compact header,.compact #settings,.compact #status,.compact #footer{display:none}
+        .compact[data-translation="true"] #original{display:none}
+        .compact[data-translation="false"] #translated{display:none}
+        .compact .text{background:transparent;padding:4px;margin:0!important;font-size:18px;line-height:1.5;max-height:220px;user-select:none}
+        .compact-tools{position:absolute;right:4px;top:4px;gap:4px;background:#172031;border-radius:7px;padding:3px}
+        .compact:hover .compact-tools,.compact:focus-within .compact-tools{display:flex}
+        .compact-tools button{font-size:12px;padding:3px 7px;white-space:nowrap}
       </style>
-      <section class="panel">
+      <section id="panel" class="panel" tabindex="-1">
         <header id="drag"><span>Cơm · OCR phụ đề</span><button id="close" title="Đóng">×</button></header>
+        <div id="settings">
         <div class="small">Kéo chọn vùng chữ. Bản này đọc chữ trong hình; chưa nghe âm thanh.</div>
         <label>Ngôn ngữ chữ <select id="language"><option value="chi_sim">Trung giản thể</option><option value="chi_tra">Trung phồn thể</option><option value="eng">English</option><option value="vie">Tiếng Việt</option></select></label>
         <label>Xử lý ảnh <select id="preprocess"><option value="white">Chữ trắng trên video</option><option value="original">Ảnh gốc (chữ màu / nền sáng)</option></select></label>
@@ -40,15 +62,22 @@
         <label><input id="translate" type="checkbox"> Dịch AI qua backend local</label>
         <label>Ngôn ngữ đích <select id="target"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
         <div class="row"><button id="select">Chọn vùng</button><button id="once">Đọc một lần</button><button id="start">Bắt đầu</button></div>
+        <button id="collapse" style="margin-top:8px" title="Chỉ hiện nội dung phụ đề">Thu gọn</button>
+        </div>
         <div id="status" role="status">Chọn vùng phụ đề để bắt đầu.</div>
         <div id="original" class="text">Chữ OCR sẽ hiện ở đây.</div>
         <div id="translated" class="text" hidden></div>
-        <div class="small" style="margin-top:8px">Chỉ quét tab đang xem. Esc hủy chọn vùng.</div>
+        <div id="footer" class="small" style="margin-top:8px">Chỉ quét tab đang xem. Esc hủy chọn vùng.</div>
+        <div class="compact-tools"><button id="expand" title="Mở lại cài đặt">⚙ Cài đặt</button><button id="pause" title="Dừng OCR và mở cài đặt">Dừng</button><button id="compact-close" title="Đóng">×</button></div>
       </section>`;
     $('select').onclick = selectRegion;
     $('start').onclick = () => running ? stop() : start();
     $('once').onclick = async () => { if (running) stop(); await scan(generation); };
     $('close').onclick = () => { stop(); host.style.display = 'none'; };
+    $('compact-close').onclick = $('close').onclick;
+    $('collapse').onclick = () => setCompact(true);
+    $('expand').onclick = () => setCompact(false);
+    $('pause').onclick = () => stop();
     for (const name of ['language', 'preprocess', 'target', 'translate']) {
       $(name).onchange = () => { stop('Đã đổi cấu hình. Bấm Bắt đầu để tiếp tục.'); lastText = ''; $('translated').textContent = ''; save(); };
     }
@@ -59,19 +88,20 @@
       // Translation always requires an explicit opt-in on each page.
     }).catch(() => {});
     let drag;
-    $('drag').onpointerdown = event => {
-      if (event.target.closest('button')) return;
+    $('panel').onpointerdown = event => {
+      if (event.target.closest('button,select,input')) return;
+      if (!$('panel').classList.contains('compact') && !event.target.closest('header')) return;
       const box = host.getBoundingClientRect();
       drag = {x: event.clientX - box.left, y: event.clientY - box.top};
-      $('drag').setPointerCapture(event.pointerId);
+      $('panel').setPointerCapture(event.pointerId);
     };
-    $('drag').onpointermove = event => {
+    $('panel').onpointermove = event => {
       if (!drag) return;
       host.style.right = 'auto';
       host.style.left = `${Math.max(0, Math.min(innerWidth - host.offsetWidth, event.clientX - drag.x))}px`;
       host.style.top = `${Math.max(0, Math.min(innerHeight - 50, event.clientY - drag.y))}px`;
     };
-    $('drag').onpointerup = $('drag').onpointercancel = () => { drag = null; };
+    $('panel').onpointerup = $('panel').onpointercancel = () => { drag = null; };
   }
   function save() {
     const settings = {};
@@ -135,12 +165,13 @@
     status(`Đã đọc · độ tin cậy OCR ${Math.round(result.confidence)}% (ước lượng).`);
     if (text === lastText) return;
     lastText = text; $('original').textContent = text; $('translated').hidden = !$('translate').checked;
-    $('translated').textContent = '';
+    $('translated').textContent = $('translate').checked ? 'Đang dịch…' : '';
     if ($('translate').checked) {
       status('Đang dịch…');
       const translated = await browser.runtime.sendMessage({type: 'TRANSLATE', text, target: $('target').value}).catch(error => ({error: error.message}));
       if (token !== generation) return;
       if (translated?.error || !translated) {
+        setCompact(false); $('translated').textContent = '';
         status(translated?.error || 'Không nhận được kết quả dịch.'); lastText = ''; return;
       }
       $('translated').textContent = translated.translation; status('Đã dịch.');
@@ -150,6 +181,7 @@
     if (!region) { status('Cơm chọn vùng trước nhé.'); return; }
     if (running) return;
     running = true; const token = ++generation; $('start').textContent = 'Dừng';
+    setCompact(true);
     while (running && generation === token) {
       const started = Date.now();
       await scan(token);

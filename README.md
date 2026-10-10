@@ -15,7 +15,9 @@ Dịch AI là tùy chọn; cần chạy backend local và cấu hình một mode
 7. Trong khung nổi, chọn **ngôn ngữ của chữ gốc**. Mặc định Trung giản thể.
 8. Bấm **Chọn vùng**, kéo hình chữ nhật sát vùng phụ đề. Không chọn cả video nếu chữ chỉ ở bên dưới.
 9. Bấm **Đọc một lần** để kiểm tra. Nếu chữ sai, thử **Ảnh gốc** thay vì **Chữ trắng trên video**.
-10. Bấm **Bắt đầu** để quét liên tục, **Dừng** để dừng. Kéo tiêu đề khung để đổi vị trí; bấm × để đóng.
+10. Bấm **Bắt đầu** để quét liên tục. Khung tự thu gọn chỉ còn **bản dịch** nếu đã bật dịch AI, hoặc chữ OCR nếu chưa bật dịch. Kéo khung phụ đề để đổi vị trí.
+11. Di chuột lên khung thu gọn để hiện nút **Cài đặt**, **Dừng**, **×**. Có thể dùng Tab để hiện các nút. **Cài đặt** mở lại giao diện đầy đủ và giữ nguyên vùng/ngôn ngữ; **Dừng** dừng quét và mở lại giao diện. Bấm biểu tượng extension cũng mở lại cài đặt.
+12. Nếu có lỗi OCR/kết nối hoặc cần chọn lại vùng, khung tự mở để hiện thông báo. Khi chưa có kết quả, khung thu gọn hiện trạng thái chờ ngắn.
 
 Đóng/mở lại Firefox sẽ mất add-on cài tạm. Làm lại bước 2–4. Sửa code thì bấm **Reload** trong `about:debugging`, rồi tải lại trang phim.
 Muốn cài lâu dài vào Firefox thông thường: gửi gói extension lên Mozilla theo kênh **Unlisted / self-distributed**, tải `.xpi` đã ký về, cài qua `about:addons → bánh răng → Install Add-on From File…`.

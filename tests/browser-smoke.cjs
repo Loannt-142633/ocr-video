@@ -19,8 +19,10 @@ const root=path.resolve(__dirname,'../extension');
   window.messageListener=null;
   window.browser={storage:{local:{get:async()=>({}),set:async()=>{}}},runtime:{onMessage:{addListener:f=>window.messageListener=f},sendMessage:m=>window.ocrBridge(m)}};
  });
+ let failTranslation = false;
  await movie.exposeFunction('ocrBridge',async(message)=>{
-  if(message.type!=='OCR')throw Error('Unexpected translation in offline test');
+  if(message.type==='TRANSLATE') return failTranslation ? {error:'Test: backend translation unavailable.'} : {translation:'Chào Cơm, OCR phụ đề hoạt động!'};
+  if(message.type!=='OCR')throw Error('Unexpected message in browser test');
   const screenshot=(await movie.screenshot()).toString('base64');
   await movie.evaluate(id=>window.messageListener({type:'CAPTURE_DONE',requestId:id}),message.requestId);
   return await page.evaluate(async({message,screenshot})=>{window.fixture='data:image/png;base64,'+screenshot;activeTabId=11;return await recognize(message,{tab:{id:11,windowId:1}})},{message,screenshot});
@@ -36,6 +38,33 @@ const root=path.resolve(__dirname,'../extension');
  await movie.waitForFunction(()=>[...document.querySelectorAll('div')].some(el=>el.shadowRoot?.getElementById('original')?.textContent.includes('subtitle OCR works')), {timeout:30000});
  console.log('Firefox selection → screenshot → local OCR → panel: passed (browser extension APIs mocked).');
  fs.mkdirSync(path.resolve(__dirname,'results'),{recursive:true});await movie.screenshot({path:path.resolve(__dirname,'results/panel.png')});
+ await movie.locator('#translate').check();
+ await movie.locator('#start').click();
+ await movie.waitForFunction(()=>[...document.querySelectorAll('div')].some(el=>{
+  const s=el.shadowRoot;return s?.getElementById('panel')?.classList.contains('compact') && s.getElementById('translated')?.textContent==='Chào Cơm, OCR phụ đề hoạt động!';
+ }));
+ const assert=require('node:assert/strict');
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ assert.equal(await movie.locator('#original').isVisible(),false);
+ assert.equal(await movie.locator('#status').isVisible(),false);
+ assert.ok((await movie.locator('#panel').boundingBox()).height < 160);
+ await movie.mouse.move(30,700);
+ await movie.screenshot({path:path.resolve(__dirname,'results/compact.png')});
+ await movie.locator('#panel').hover();
+ await movie.locator('#expand').click();
+ assert.equal(await movie.locator('#settings').isVisible(),true);
+ assert.equal(await movie.locator('#language').inputValue(),'eng');
+ assert.equal(await movie.locator('#start').textContent(),'Dừng');
+ await movie.locator('#start').click();
+ failTranslation=true;
+ await movie.locator('#target').selectOption('en');
+ await movie.locator('#start').click();
+ await movie.waitForFunction(()=>[...document.querySelectorAll('div')].some(el=>{
+  const s=el.shadowRoot;return s?.getElementById('status')?.textContent==='Test: backend translation unavailable.' && !s.getElementById('panel').classList.contains('compact');
+ }));
+ assert.equal(await movie.locator('#settings').isVisible(),true);
+ await movie.locator('#start').click();
+ console.log('Compact translation display / expand preserves settings and scan / translation error reopens panel: passed (translation mocked).');
  }finally{await browser.close();server.close()}
 
 })().catch(e=>{console.error(e);process.exit(1)});
