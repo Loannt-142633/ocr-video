@@ -1,0 +1,30 @@
+{
+  "name": "com-subtitle-ocr",
+  "version": "0.1.0",
+  "description": "Firefox offline subtitle OCR with optional local AI translation",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/utils.test.cjs",
+    "lint": "web-ext lint --source-dir extension",
+    "pack": "web-ext build --source-dir extension --overwrite-dest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@tesseract.js-data/chi_sim": "1.0.0",
+    "@tesseract.js-data/chi_tra": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/vie": "1.0.0",
+    "tesseract.js": "6.0.1"
+  },
+  "private": true,
+  "devDependencies": {
+    "web-ext": "8.9.0"
+  }
+}
