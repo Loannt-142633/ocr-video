@@ -92,7 +92,7 @@ async function translate(text, target) {
       throw new Error(detail || `Backend dịch trả lỗi ${response.status}. Kiểm tra terminal backend.`);
     }
     const data = await response.json();
-    if (typeof data.translation !== 'string') throw new Error('Backend trả kết quả sai định dạng.');
+    if (typeof data?.translation !== 'string' || !data.translation.trim()) throw new Error('Backend không trả bản dịch hợp lệ.');
     if (translationCache.size >= 200) translationCache.delete(translationCache.keys().next().value);
     translationCache.set(key, data.translation);
     return {translation: data.translation};

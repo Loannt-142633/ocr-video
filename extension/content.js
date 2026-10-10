@@ -2,11 +2,21 @@
   if (globalThis.__comSubtitleOCR) return;
   globalThis.__comSubtitleOCR = true;
   let host, ui, region = null, running = false, generation = 0, selecting = false;
-  let lastText = '', requestCounter = 0, scanInFlight = null;
+  let lastOCRText = '', lastTranslation = null, requestCounter = 0, scanInFlight = null;
   let regionViewport = null, lastNonempty = 0;
+  let drag = null;
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const $ = id => ui.getElementById(id);
   const status = text => { if (ui) $('status').textContent = text; };
+
+  function scanPaused() {
+    const box = host.getBoundingClientRect();
+    const overlaps = region && box.left < region.x + region.width && box.right > region.x &&
+      box.top < region.y + region.height && box.bottom > region.y;
+    // Keep this separate from status: an in-flight translation may still complete.
+    $('scan-notice').hidden = !!drag || !overlaps;
+    return !!drag || !!overlaps;
+  }
 
   function setCompact(compact) {
     if (!ui) return;
@@ -22,8 +32,15 @@
 
   function stop(note = 'Đã dừng.') {
     running = false; generation++;
+    drag = null;
     if (host) host.style.visibility = 'visible';
-    if (ui) { setCompact(false); $('start').textContent = 'Bắt đầu'; status(note); }
+    if (ui) {
+      setCompact(false); $('start').textContent = 'Bắt đầu'; status(note);
+      $('scan-notice').hidden = true;
+      // Expanding a panel dragged near the bottom must not hide its error message.
+      const box = host.getBoundingClientRect();
+      if (box.bottom > innerHeight) host.style.top = `${Math.max(12, innerHeight - (box.bottom - box.top) - 12)}px`;
+    }
   }
   function mount() {
     if (host) { host.style.display = ''; setCompact(false); return; }
@@ -40,6 +57,7 @@
         button:hover{background:#3a4f70} #close{padding:1px 8px} label{display:block;margin:9px 0} select{max-width:100%}
         .row{display:flex;gap:6px;flex-wrap:wrap} .row button{flex:1} #start{background:#1c6657}
         #status{font-size:12px;color:#bdd0df;margin:10px 0;min-height:18px}
+        #scan-notice{font-size:12px;color:#ffe09a;margin:4px 0}
         .text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto;padding:9px;background:#0e1625;border-radius:7px;user-select:text}
         #translated{color:#b3f3de;margin-top:8px} .small{font-size:12px;color:#aabacd} input[type=number]{width:72px;padding:5px;background:#293850;color:#fff;border:1px solid #53637c;border-radius:5px}
         .compact-tools{display:none}
@@ -66,6 +84,7 @@
         <button id="collapse" style="margin-top:8px" title="Chỉ hiện nội dung phụ đề">Thu gọn</button>
         </div>
         <div id="status" role="status">Chọn vùng phụ đề để bắt đầu.</div>
+        <div id="scan-notice" role="status" hidden>Kéo khung ra ngoài vùng OCR để tiếp tục</div>
         <div id="original" class="text">Chữ OCR sẽ hiện ở đây.</div>
         <div id="translated" class="text" hidden></div>
         <div id="footer" class="small" style="margin-top:8px">Chỉ quét tab đang xem. Esc hủy chọn vùng.</div>
@@ -80,7 +99,7 @@
     $('expand').onclick = () => setCompact(false);
     $('pause').onclick = () => stop();
     for (const name of ['language', 'preprocess', 'target', 'translate', 'noise-filter']) {
-      $(name).onchange = () => { stop('Đã đổi cấu hình. Bấm Bắt đầu để tiếp tục.'); lastText = ''; $('translated').textContent = ''; save(); };
+      $(name).onchange = () => { stop('Đã đổi cấu hình. Bấm Bắt đầu để tiếp tục.'); lastOCRText = ''; $('translated').textContent = ''; save(); };
     }
     $('interval').onchange = save;
     browser.storage.local.get('settings').then(({settings}) => {
@@ -89,21 +108,28 @@
       if (typeof settings.noiseFilter === 'boolean') $('noise-filter').checked = settings.noiseFilter;
       // Translation always requires an explicit opt-in on each page.
     }).catch(() => {});
-    let drag;
     $('panel').onpointerdown = event => {
+      if (drag || event.button > 0) return;
       if (event.target.closest('button,select,input')) return;
       if (!$('panel').classList.contains('compact') && !event.target.closest('header')) return;
       const box = host.getBoundingClientRect();
-      drag = {x: event.clientX - box.left, y: event.clientY - box.top};
+      drag = {x: event.clientX - box.left, y: event.clientY - box.top, pointerId: event.pointerId};
       $('panel').setPointerCapture(event.pointerId);
+      scanPaused();
     };
     $('panel').onpointermove = event => {
-      if (!drag) return;
+      if (!drag || event.pointerId !== drag.pointerId) return;
       host.style.right = 'auto';
       host.style.left = `${Math.max(0, Math.min(innerWidth - host.offsetWidth, event.clientX - drag.x))}px`;
       host.style.top = `${Math.max(0, Math.min(innerHeight - 50, event.clientY - drag.y))}px`;
+      scanPaused();
     };
-    $('panel').onpointerup = $('panel').onpointercancel = () => { drag = null; };
+    const endDrag = event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      drag = null;
+      scanPaused();
+    };
+    $('panel').onpointerup = $('panel').onpointercancel = $('panel').onlostpointercapture = endDrag;
   }
   function save() {
     const settings = {};
@@ -136,7 +162,7 @@
       const chosen = {x: Math.min(anchor.x,event.clientX), y: Math.min(anchor.y,event.clientY), width: Math.abs(anchor.x-event.clientX), height: Math.abs(anchor.y-event.clientY)};
       cleanup();
       if (chosen.width < 20 || chosen.height < 10) { status('Vùng quá nhỏ. Hãy chọn lại.'); return; }
-      region = chosen; regionViewport = {width: innerWidth, height: innerHeight}; lastText = '';
+      region = chosen; regionViewport = {width: innerWidth, height: innerHeight}; lastOCRText = '';
       status(`Đã chọn vùng ${Math.round(region.width)} × ${Math.round(region.height)}. Bấm Đọc một lần hoặc Bắt đầu.`);
     };
   }
@@ -152,12 +178,7 @@
     if (!region) { status('Cơm chọn vùng phụ đề trước nhé.'); return; }
     if (document.hidden) { stop('Đã dừng vì tab không còn hiển thị.'); return; }
     if (innerWidth !== regionViewport.width || innerHeight !== regionViewport.height) { region = null; stop('Kích thước trang thay đổi. Hãy chọn lại vùng.'); return; }
-    const box = host.getBoundingClientRect();
-    if (box.left < region.x + region.width && box.right > region.x &&
-        box.top < region.y + region.height && box.bottom > region.y) {
-      stop('Khung phụ đề đang che vùng OCR. Hãy kéo khung ra ngoài vùng đã chọn rồi bắt đầu lại.');
-      return;
-    }
+    if (scanPaused()) return;
     const requestId = ++requestCounter;
     status('Đang đọc chữ… Lần đầu cần nạp mô hình OCR.');
     let result;
@@ -171,23 +192,31 @@
     const text = result.text;
     if (!text || result.confidence < 25) {
       status('Chưa thấy chữ rõ. Thử đổi xử lý ảnh hoặc chọn vùng sát hơn.');
-      if (Date.now() - lastNonempty > 3500) { lastText = ''; $('original').textContent = ''; $('translated').textContent = ''; }
+      if (Date.now() - lastNonempty > 3500) { lastOCRText = ''; $('original').textContent = ''; $('translated').textContent = ''; }
       return;
     }
     lastNonempty = Date.now();
     status(`Đã đọc · độ tin cậy OCR ${Math.round(result.confidence)}% (ước lượng).`);
-    if (text === lastText) return;
-    lastText = text; $('original').textContent = text; $('translated').hidden = !$('translate').checked;
+    if (text !== lastOCRText) { lastOCRText = text; $('original').textContent = text; }
+    $('translated').hidden = !$('translate').checked;
     if (!$('translate').checked) $('translated').textContent = '';
     if ($('translate').checked) {
-      status('Đang dịch…');
-      const translated = await browser.runtime.sendMessage({type: 'TRANSLATE', text, target: $('target').value}).catch(error => ({error: error.message}));
-      if (token !== generation) return;
-      if (translated?.error || !translated) {
-        setCompact(false); $('translated').textContent = '';
-        status(translated?.error || 'Không nhận được kết quả dịch.'); lastText = ''; return;
+      const target = $('target').value;
+      if (lastTranslation?.text === text && lastTranslation.target === target) {
+        $('translated').textContent = lastTranslation.translation;
+        status('Đã dịch.'); return;
       }
-      $('translated').textContent = translated.translation; status('Đã dịch.');
+      status('Đang dịch…');
+      const translated = await browser.runtime.sendMessage({type: 'TRANSLATE', text, target}).catch(error => ({error: error.message}));
+      if (token !== generation) return;
+      if (translated?.error || typeof translated?.translation !== 'string' || !translated.translation.trim()) {
+        $('translated').textContent = '';
+        // Pause on failure: a deliberate restart retries without hammering the backend.
+        stop(`${translated?.error || 'Không nhận được bản dịch hợp lệ.'} Bấm Đọc một lần hoặc Bắt đầu để thử lại.`);
+        return;
+      }
+      lastTranslation = {text, target, translation: translated.translation.trim()};
+      $('translated').textContent = lastTranslation.translation; status('Đã dịch.');
     }
   }
   async function start() {

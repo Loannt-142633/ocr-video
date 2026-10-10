@@ -81,10 +81,11 @@ export LLM_BASE_URL="http://127.0.0.1:11434/v1"
 - Fullscreen thật và Picture-in-Picture chưa hỗ trợ khung nổi. Dùng chế độ thường/theater.
 - OCR có thể nhầm tên riêng, chữ nhỏ, chữ màu, nền nhiều chi tiết, và đọc cả chữ khác trong vùng đã chọn. Chọn sát phụ đề, tăng kích thước video hoặc thử xử lý ảnh gốc.
 - Khoảng quét mặc định 1.200 ms là mục tiêu giữa các lần bắt đầu, không bảo đảm mỗi câu xử lý trong 1.200 ms. Chạy tuần tự để tránh xếp hàng ảnh cũ. Nếu OCR/dịch chậm, có thể bỏ lỡ câu ngắn; nên pause phim và dùng Đọc một lần khi cần.
-- Kết quả không có timestamp chính xác theo video, nên có thể trễ so với lời thoại. Chữ giống hệt liên tiếp không dịch lại. Nếu không có chữ rõ, kết quả cũ được xóa sau khoảng 3,5 giây khi quét.
+- Kết quả không có timestamp chính xác theo video, nên có thể trễ so với lời thoại. Chỉ bỏ qua dịch lại khi đã có bản dịch hợp lệ cho cùng câu và cùng ngôn ngữ đích. Nếu chưa dịch thành công (lỗi hoặc đã dừng/đổi cấu hình khi đang chờ), cùng câu vẫn được phép dịch lại. Nếu không có chữ rõ, kết quả cũ được xóa sau khoảng 3,5 giây khi quét.
 - Seek/pause chưa theo dõi trực tiếp trình phát. Chữ dịch cũ có thể còn một lúc sau khi tua; bấm Dừng/Bắt đầu để cập nhật.
-- Khung phụ đề luôn hiện khi chụp OCR; chỉ ẩn khi đang chọn vùng. Nếu khung giao với vùng OCR, quét dừng và thông báo kéo khung ra ngoài vùng đã chọn, tránh OCR đọc lại chính bản dịch. Kéo khung rồi bấm Bắt đầu lại.
+- Khung phụ đề luôn hiện khi chụp OCR; chỉ ẩn khi đang chọn vùng. Kéo khung thu gọn giữ nguyên phiên OCR/dịch và cấu hình, tạm bỏ qua lượt chụp mới trong lúc kéo. Thả ngoài vùng OCR thì tự tiếp tục ở lượt quét kế tiếp. Nếu thả trong vùng OCR, khung vẫn thu gọn và hiện “Kéo khung ra ngoài vùng OCR để tiếp tục”; chụp tạm ngưng đến khi kéo khung ra ngoài. Hủy kéo hoặc mất pointer capture cũng kết thúc trạng thái kéo. Không cần bấm Bắt đầu lại; nút Dừng/Đóng hoặc đổi cấu hình vẫn kết thúc phiên như trước.
 - Giữ bản dịch cũ khi chờ dịch câu mới, trạng thái “Đang dịch…” chỉ nằm trong thông báo. Khi dừng hoặc đổi cấu hình, kết quả đang chờ bị bỏ qua; lượt quét mới chờ lượt OCR/dịch cũ kết thúc để tránh request chồng nhau.
+- Khi dịch lỗi hoặc trả bản dịch rỗng/sai định dạng, quét dừng và hiển thị lý do cùng hướng dẫn thử lại. Bấm **Đọc một lần** hoặc **Bắt đầu** để dịch lại; không tự gọi backend liên tục khi lỗi. Khi mở rộng khung gần đáy màn hình, khung được kéo lên để thấy thông báo.
 
 ## Quyền và dữ liệu
 

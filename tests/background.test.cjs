@@ -23,3 +23,13 @@ test('non-JSON and structured validation errors retain useful HTTP fallback', as
     await assert.rejects(fixture({ok: false, status: 502, json})(), /Backend dịch trả lỗi 502/);
   }
 });
+
+test('invalid or empty translation is rejected and never cached, allowing retry', async () => {
+  for (const invalid of [null, {}, {translation: 123}, {translation: ''}, {translation: '   '}]) {
+    let calls = 0;
+    const translate = fixture({ok: true, json: async () => ++calls === 1 ? invalid : {translation: 'Xin chào'}});
+    await assert.rejects(translate(), /không trả bản dịch hợp lệ/);
+    assert.equal((await translate()).translation, 'Xin chào');
+    assert.equal(calls, 2);
+  }
+});

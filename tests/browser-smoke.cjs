@@ -21,9 +21,12 @@ const root=path.resolve(__dirname,'../extension');
   window.messageListener=null;
   window.browser={storage:{local:{get:async()=>({}),set:async()=>{}}},runtime:{onMessage:{addListener:f=>window.messageListener=f},sendMessage:m=>window.ocrBridge(m)}};
  });
- let failTranslation = false, captures = 0;
+ let failTranslation = false, captures = 0, translations = 0;
  await movie.exposeFunction('ocrBridge',async(message)=>{
-  if(message.type==='TRANSLATE') return failTranslation ? {error:'Test: backend translation unavailable.'} : {translation:'Chào Cơm, OCR phụ đề hoạt động!'};
+  if(message.type==='TRANSLATE') {
+   await movie.evaluate(count=>window.testTranslations=count,++translations);
+   return failTranslation ? {error:'Test: backend translation unavailable.'} : {translation:'Chào Cơm, OCR phụ đề hoạt động!'};
+  }
   if(message.type!=='OCR')throw Error('Unexpected message in browser test');
   captures++;
   assert.equal(await movie.locator('#panel').isVisible(),true, 'Panel remains visible at capture');
@@ -52,6 +55,43 @@ const root=path.resolve(__dirname,'../extension');
  assert.ok((await movie.locator('#panel').boundingBox()).height < 160);
  await movie.mouse.move(30,700);
  await movie.screenshot({path:path.resolve(__dirname,'results/compact.png')});
+ // Real pointer capture and movement while the original OCR loop keeps ticking.
+ async function beginDrag() {
+  const box=await movie.locator('#panel').boundingBox();
+  const offset={x:30,y:box.height-8};
+  await movie.mouse.move(box.x+offset.x,box.y+offset.y);await movie.mouse.down();
+  return offset;
+ }
+ async function moveHost(x,y,offset) { await movie.mouse.move(x+offset.x,y+offset.y); }
+ const safe={x:1444,y:16};
+ let offset=await beginDrag(), before=captures, previousTranslations=translations;
+ await moveHost(bounds.x,bounds.y,offset);
+ await movie.waitForTimeout(1400);
+ assert.equal(captures,before,'Dragging across OCR must skip new capture');
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ assert.equal(await movie.locator('#start').textContent(),'Dừng');
+ await moveHost(safe.x,safe.y,offset);
+ await movie.waitForTimeout(1400);
+ assert.equal(captures,before,'Dragging outside OCR still skips capture until release');
+ await movie.locator('#subtitle').evaluate(el=>el.textContent='Where are you going tonight?');
+ await movie.mouse.up();
+ await movie.waitForFunction(count=>window.testTranslations>count,previousTranslations);
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ offset=await beginDrag();before=captures;previousTranslations=translations;
+ await moveHost(bounds.x,bounds.y,offset);await movie.mouse.up();
+ await movie.waitForTimeout(1400);
+ assert.equal(captures,before,'Dropping inside OCR must remain paused');
+ assert.equal(await movie.locator('#scan-notice').isVisible(),true);
+ assert.equal(await movie.locator('#scan-notice').textContent(),'Kéo khung ra ngoài vùng OCR để tiếp tục');
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ offset=await beginDrag();await moveHost(safe.x,safe.y,offset);
+ await movie.locator('#subtitle').evaluate(el=>el.textContent='I will be back tomorrow.');
+ await movie.mouse.up();
+ await movie.waitForFunction(count=>window.testTranslations>count,previousTranslations);
+ assert.equal(await movie.locator('#scan-notice').isVisible(),false);
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ assert.equal(await movie.locator('#target').inputValue(),'vi');
+ console.log('Real drag across OCR / drop inside / drag out: stays compact, skips capture and resumes translation automatically.');
  await movie.locator('#panel').hover();
  await movie.locator('#expand').click();
  assert.equal(await movie.locator('#settings').isVisible(),true);
@@ -62,20 +102,25 @@ const root=path.resolve(__dirname,'../extension');
  await movie.locator('#target').selectOption('en');
  await movie.locator('#start').click();
  await movie.waitForFunction(()=>[...document.querySelectorAll('div')].some(el=>{
-  const s=el.shadowRoot;return s?.getElementById('status')?.textContent==='Test: backend translation unavailable.' && !s.getElementById('panel').classList.contains('compact');
+  const s=el.shadowRoot;return s?.getElementById('status')?.textContent.startsWith('Test: backend translation unavailable.') && !s.getElementById('panel').classList.contains('compact');
  }));
  assert.equal(await movie.locator('#settings').isVisible(),true);
- await movie.locator('#start').click();
+ assert.equal(await movie.locator('#start').textContent(),'Bắt đầu');
  console.log('Compact translation display / expand preserves settings and scan / translation error reopens panel: passed (translation mocked).');
  const previousCaptures = captures;
- await movie.evaluate(async bounds=>{
+ await movie.evaluate(bounds=>{
   const host=[...document.querySelectorAll('div')].find(el=>el.shadowRoot);
   host.style.left=`${bounds.x}px`;host.style.top=`${bounds.y}px`;host.style.right='auto';
-  await host.shadowRoot.getElementById('once').onclick();
+  host.shadowRoot.getElementById('start').onclick();
  },bounds);
  assert.equal(captures,previousCaptures,'Overlapping panel must block capture');
- assert.match(await movie.locator('#status').textContent(),/kéo khung ra ngoài/);
- console.log('Panel overlapping OCR region blocks screenshot and displays move instruction: passed.');
+ assert.equal(await movie.locator('#scan-notice').textContent(),'Kéo khung ra ngoài vùng OCR để tiếp tục');
+ assert.equal(await movie.locator('#settings').isVisible(),false);
+ const statusBox = await movie.locator('#scan-notice').boundingBox();
+ assert.ok(statusBox.y >= 0 && statusBox.y + statusBox.height <= 800, 'Overlap error must be visible inside the viewport');
+ await movie.locator('#panel').hover();await movie.locator('#pause').click();
+ assert.equal(await movie.locator('#start').textContent(),'Bắt đầu');
+ console.log('Panel overlapping OCR region pauses screenshot with compact visible notice; Stop ends session: passed.');
  }finally{await browser.close();server.close()}
 
 })().catch(e=>{console.error(e);process.exit(1)});
